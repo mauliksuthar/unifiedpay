@@ -88,7 +88,14 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
     const msg = data?.error?.message ?? data?.title ?? res.statusText;
-    if (res.status === 401 && typeof window !== "undefined" && !window.location.pathname.startsWith("/login") && !window.location.pathname.startsWith("/admin")) {
+    const razorpayFailure = /razorpay/i.test(String(msg));
+    if (
+      res.status === 401 &&
+      !razorpayFailure &&
+      typeof window !== "undefined" &&
+      !window.location.pathname.startsWith("/login") &&
+      !window.location.pathname.startsWith("/admin")
+    ) {
       clearAuth();
       window.location.assign("/login");
     }

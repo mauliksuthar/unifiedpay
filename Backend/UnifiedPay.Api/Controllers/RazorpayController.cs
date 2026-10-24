@@ -48,7 +48,7 @@ public class RazorpayController(IHttpClientFactory httpClientFactory, IConfigura
 
         var body = await response.Content.ReadAsStringAsync(ct);
         if (response.StatusCode == System.Net.HttpStatusCode.Unauthorized)
-            return StatusCode(401, new { error = new { message = "Razorpay authentication failed." } });
+            return StatusCode(502, new { error = new { message = "Razorpay rejected the API keys. Check the key id and secret, then try again." } });
 
         if (!response.IsSuccessStatusCode)
             return StatusCode(500, new { error = new { message = "Razorpay order creation failed.", detail = body } });
