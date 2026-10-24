@@ -8,6 +8,7 @@ import {
   LogoutOutlined,
   DashboardOutlined,
   RollbackOutlined,
+  TeamOutlined,
 } from "@ant-design/icons";
 import { Avatar, Dropdown } from "antd";
 import Link from "next/link";
@@ -148,6 +149,7 @@ const merchantGroups: NavGroup[] = [
     links: [
       { key: "dashboard", href: "/dashboard", label: "Dashboard", icon: <DashboardOutlined /> },
       { key: "transfer", href: "/dashboard/transfer", label: "Card to bank", icon: <CreditCardOutlined /> },
+      { key: "accounts", href: "/dashboard/accounts", label: "Accounts", icon: <TeamOutlined /> },
     ],
   },
   {

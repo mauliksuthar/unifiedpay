@@ -352,6 +352,30 @@ a:hover {
   accent-color: #3b7ddd;
 }
 
+button.account {
+  width: 100%;
+  text-align: left;
+  font: inherit;
+  color: inherit;
+}
+
+.account.static {
+  cursor: default;
+}
+
+.account.frozen {
+  opacity: 0.72;
+}
+
+.account-body {
+  flex: 1;
+}
+
+.account-action {
+  margin-left: auto;
+  flex: none;
+}
+
 .muted {
   color: #6c757d;
   font-size: 0.875rem;

@@ -72,12 +72,25 @@ public record CardToBankRequest(
     string? CustomerEmail,
     string? CustomerMobile);
 
+public record CreateCustomerRequest(string Name, string? Mobile, string? Email);
+
 public record AddSettlementAccountRequest(
     string Label,
     string BankName,
     string HolderName,
     string Ifsc,
-    string AccountNumber);
+    string AccountNumber,
+    Guid? CustomerId = null);
+
+public record UpdateSettlementAccountRequest(
+    string Label,
+    string BankName,
+    string HolderName,
+    string Ifsc,
+    string? AccountNumber,
+    Guid? CustomerId);
+
+public record SetFrozenRequest(bool Frozen);
 
 public record PaymentDto(
     Guid Id,
@@ -112,3 +125,18 @@ public record CommissionInvoiceDto(
     DateTimeOffset IssuedAt);
 
 public record FreezeMerchantRequest(string Reason);
+
+public record AdminMerchantRequest(
+    string LegalName,
+    string Email,
+    string? Password,
+    string MobileE164,
+    string? Pan,
+    string? Gstin,
+    string? Mcc,
+    string? WebsiteUrl,
+    string? SettlementIfsc,
+    string? SettlementAccountNumber,
+    string? BrandName,
+    decimal? PlatformFeePercent,
+    string? Status);

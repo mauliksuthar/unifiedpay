@@ -10,6 +10,44 @@ export type TxnDetail = {
   timeline: Array<{ name: string; state: string; at: string; detail: string }>;
 };
 
+export type CustomerRow = {
+  id: string;
+  name: string;
+  mobile?: string | null;
+  email?: string | null;
+  accountCount?: number;
+  primaryBank?: string | null;
+};
+
+export type AccountRow = {
+  id: string;
+  label: string;
+  bankName: string;
+  holderName: string;
+  ifsc: string;
+  accountLast4: string;
+  isDefault: boolean;
+  isFrozen?: boolean;
+  customerId?: string | null;
+  customerName?: string | null;
+};
+
+export type AdminMerchant = {
+  id: string;
+  legalName: string;
+  brandName?: string | null;
+  email: string;
+  mobileE164?: string | null;
+  panMasked?: string | null;
+  gstin?: string | null;
+  mcc?: string | null;
+  websiteUrl?: string | null;
+  settlementIfsc?: string | null;
+  settlementAccountLast4?: string | null;
+  status: string;
+  platformFeePercent: number;
+};
+
 export type AuthResponse = {
   accessToken: string;
   expiresIn: number;
@@ -24,6 +62,20 @@ function authHeader(): HeadersInit {
   return token ? { Authorization: `Bearer ${token}` } : {};
 }
 
+async function adminRequest<T>(token: string, path: string, init?: RequestInit): Promise<T> {
+  const res = await fetch(`${API_BASE}${path}`, {
+    ...init,
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+      ...(init?.headers ?? {}),
+    },
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data?.error?.message ?? data?.title ?? res.statusText);
+  return data as T;
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, {
     ...init,
@@ -36,6 +88,10 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
     const msg = data?.error?.message ?? data?.title ?? res.statusText;
+    if (res.status === 401 && typeof window !== "undefined" && !window.location.pathname.startsWith("/login") && !window.location.pathname.startsWith("/admin")) {
+      clearAuth();
+      window.location.assign("/login");
+    }
     throw new Error(msg);
   }
   return data as T;
@@ -78,12 +134,56 @@ export const api = {
   history: (bucket: "success" | "failed" | "reversed" | "settlement" | "all") =>
     request<{ data: Array<Record<string, unknown>> }>(`/v1/merchants/me/history/${bucket}`),
   transaction: (id: string) => request<TxnDetail>(`/v1/merchants/me/transactions/${id}`),
-  accounts: () => request<{ data: Array<Record<string, unknown>> }>("/v1/merchants/me/accounts"),
-  addAccount: (body: Record<string, string>) =>
-    request<Record<string, unknown>>("/v1/merchants/me/accounts", {
+  customers: (q?: string) =>
+    request<{ data: CustomerRow[] }>(`/v1/merchants/me/customers${q ? `?q=${encodeURIComponent(q)}` : ""}`),
+  addCustomer: (body: { name: string; mobile?: string; email?: string }) =>
+    request<CustomerRow>("/v1/merchants/me/customers", {
       method: "POST",
       body: JSON.stringify(body),
     }),
+  accounts: (q?: { customerId?: string; bank?: string }) => {
+    const params = new URLSearchParams();
+    if (q?.customerId) params.set("customerId", q.customerId);
+    if (q?.bank) params.set("q", q.bank);
+    const search = params.toString();
+    return request<{ data: AccountRow[] }>(`/v1/merchants/me/accounts${search ? `?${search}` : ""}`);
+  },
+  addAccount: (body: {
+    label: string;
+    bankName: string;
+    holderName: string;
+    ifsc: string;
+    accountNumber: string;
+    customerId: string;
+  }) =>
+    request<AccountRow>("/v1/merchants/me/accounts", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  updateAccount: (
+    id: string,
+    body: {
+      label: string;
+      bankName: string;
+      holderName: string;
+      ifsc: string;
+      accountNumber?: string;
+      customerId?: string | null;
+    },
+  ) =>
+    request<AccountRow>(`/v1/merchants/me/accounts/${id}`, {
+      method: "PUT",
+      body: JSON.stringify(body),
+    }),
+  deleteAccount: (id: string) =>
+    request<{ accountId: string }>(`/v1/merchants/me/accounts/${id}`, { method: "DELETE" }),
+  setAccountFrozen: (id: string, frozen: boolean) =>
+    request<AccountRow>(`/v1/merchants/me/accounts/${id}/freeze`, {
+      method: "POST",
+      body: JSON.stringify({ frozen }),
+    }),
+  makeAccountPrimary: (id: string) =>
+    request<{ id: string; isDefault: boolean }>(`/v1/merchants/me/accounts/${id}/primary`, { method: "POST" }),
   cardToBank: (body: {
     amountPaise: number;
     settlementAccountId: string;
@@ -114,13 +214,19 @@ export const api = {
       body: JSON.stringify(body),
     }),
   adminMerchants: (token: string) =>
-    fetch(`${API_BASE}/v1/admin/merchants`, {
-      headers: { Authorization: `Bearer ${token}` },
-    }).then(async (res) => {
-      const data = await res.json();
-      if (!res.ok) throw new Error(data?.error?.message ?? res.statusText);
-      return data as { data: Array<Record<string, unknown>> };
+    adminRequest<{ data: AdminMerchant[] }>(token, "/v1/admin/merchants"),
+  adminCreateMerchant: (token: string, body: Record<string, unknown>) =>
+    adminRequest<AdminMerchant>(token, "/v1/admin/merchants", {
+      method: "POST",
+      body: JSON.stringify(body),
     }),
+  adminUpdateMerchant: (token: string, id: string, body: Record<string, unknown>) =>
+    adminRequest<AdminMerchant>(token, `/v1/admin/merchants/${id}`, {
+      method: "PUT",
+      body: JSON.stringify(body),
+    }),
+  adminDeleteMerchant: (token: string, id: string) =>
+    adminRequest<{ merchantId: string }>(token, `/v1/admin/merchants/${id}`, { method: "DELETE" }),
   freezeMerchant: (token: string, id: string, reason: string) =>
     fetch(`${API_BASE}/v1/admin/merchants/${id}/freeze`, {
       method: "POST",

@@ -218,6 +218,8 @@ public class PaymentOrchestrationService(
         var account = await db.SettlementAccounts
             .FirstOrDefaultAsync(a => a.Id == req.SettlementAccountId && a.MerchantId == merchantId, ct)
             ?? throw new ApiException(404, "NOT_FOUND", "Selected bank account was not found.");
+        if (account.IsFrozen)
+            throw new ApiException(403, "FORBIDDEN", "This bank account is frozen.");
 
         var order = new Order
         {

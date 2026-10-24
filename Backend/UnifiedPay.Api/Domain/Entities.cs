@@ -57,7 +57,21 @@ public class Merchant
 
     public ICollection<Order> Orders { get; set; } = new List<Order>();
     public ICollection<CommissionInvoice> Invoices { get; set; } = new List<CommissionInvoice>();
+    public ICollection<Customer> Customers { get; set; } = new List<Customer>();
     public ICollection<SettlementAccount> SettlementAccounts { get; set; } = new List<SettlementAccount>();
+}
+
+public class Customer
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid MerchantId { get; set; }
+    public Merchant Merchant { get; set; } = null!;
+    public string Name { get; set; } = string.Empty;
+    public string? Mobile { get; set; }
+    public string? Email { get; set; }
+    public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
+
+    public ICollection<SettlementAccount> Accounts { get; set; } = new List<SettlementAccount>();
 }
 
 public class SettlementAccount
@@ -71,6 +85,9 @@ public class SettlementAccount
     public string Ifsc { get; set; } = string.Empty;
     public string AccountLast4 { get; set; } = string.Empty;
     public bool IsDefault { get; set; }
+    public bool IsFrozen { get; set; }
+    public Guid? CustomerId { get; set; }
+    public Customer? Customer { get; set; }
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
 }
 

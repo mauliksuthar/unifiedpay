@@ -11,6 +11,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<Refund> Refunds => Set<Refund>();
     public DbSet<CommissionInvoice> CommissionInvoices => Set<CommissionInvoice>();
     public DbSet<AuditLog> AuditLogs => Set<AuditLog>();
+    public DbSet<Customer> Customers => Set<Customer>();
     public DbSet<SettlementAccount> SettlementAccounts => Set<SettlementAccount>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
@@ -41,10 +42,20 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             e.HasOne(x => x.Transaction).WithMany(t => t.Refunds).HasForeignKey(x => x.TransactionId);
         });
 
+        modelBuilder.Entity<Customer>(e =>
+        {
+            e.Property(x => x.Name).HasMaxLength(200);
+            e.Property(x => x.Mobile).HasMaxLength(20);
+            e.Property(x => x.Email).HasMaxLength(200);
+            e.HasIndex(x => new { x.MerchantId, x.Name });
+            e.HasOne(x => x.Merchant).WithMany(m => m.Customers).HasForeignKey(x => x.MerchantId);
+        });
+
         modelBuilder.Entity<SettlementAccount>(e =>
         {
             e.HasIndex(x => new { x.MerchantId, x.Ifsc, x.AccountLast4 }).IsUnique();
             e.HasOne(x => x.Merchant).WithMany(m => m.SettlementAccounts).HasForeignKey(x => x.MerchantId);
+            e.HasOne(x => x.Customer).WithMany(c => c.Accounts).HasForeignKey(x => x.CustomerId).IsRequired(false);
         });
 
         modelBuilder.Entity<CommissionInvoice>(e =>

@@ -95,6 +95,27 @@ using (var scope = app.Services.CreateScope())
             Ifsc nvarchar(11) NOT NULL,
             AccountLast4 nvarchar(4) NOT NULL,
             IsDefault bit NOT NULL,
+            IsFrozen bit NOT NULL CONSTRAINT DF_SettlementAccounts_IsFrozen DEFAULT 0,
+            CreatedAt datetimeoffset NOT NULL,
+            CustomerId uniqueidentifier NULL
+        );
+        """);
+    db.Database.ExecuteSqlRaw("""
+        IF COL_LENGTH('dbo.SettlementAccounts', 'CustomerId') IS NULL
+        ALTER TABLE dbo.SettlementAccounts ADD CustomerId uniqueidentifier NULL;
+        """);
+    db.Database.ExecuteSqlRaw("""
+        IF COL_LENGTH('dbo.SettlementAccounts', 'IsFrozen') IS NULL
+        ALTER TABLE dbo.SettlementAccounts ADD IsFrozen bit NOT NULL CONSTRAINT DF_SettlementAccounts_IsFrozen DEFAULT 0;
+        """);
+    db.Database.ExecuteSqlRaw("""
+        IF OBJECT_ID('dbo.Customers', 'U') IS NULL
+        CREATE TABLE dbo.Customers (
+            Id uniqueidentifier NOT NULL PRIMARY KEY,
+            MerchantId uniqueidentifier NOT NULL,
+            Name nvarchar(200) NOT NULL,
+            Mobile nvarchar(20) NULL,
+            Email nvarchar(200) NULL,
             CreatedAt datetimeoffset NOT NULL
         );
         """);

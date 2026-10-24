@@ -1,10 +1,12 @@
 "use client";
 
-import { Alert, Button, Card, Col, Input, Row } from "antd";
+import { Alert, Button, Card, Col, Input, Row, Select } from "antd";
 import Script from "next/script";
 import { useEffect, useState } from "react";
+import { AccountChoices, accountMatches } from "@/components/AccountChoices";
+import { BankAccountModal } from "@/components/BankAccountModal";
 import { PageHeading } from "@/components/PageHeading";
-import { api } from "@/lib/api";
+import { api, type AccountRow, type CustomerRow } from "@/lib/api";
 
 declare global {
   interface Window {
@@ -17,52 +19,65 @@ declare global {
 
 export default function TransferPage() {
   const [amount, setAmount] = useState("100");
-  const [accounts, setAccounts] = useState<Array<Record<string, unknown>>>([]);
+  const [accounts, setAccounts] = useState<AccountRow[]>([]);
+  const [customers, setCustomers] = useState<CustomerRow[]>([]);
   const [accountId, setAccountId] = useState("");
-  const [showAdd, setShowAdd] = useState(false);
-  const [newAccount, setNewAccount] = useState({ label: "", bankName: "", holderName: "", ifsc: "", accountNumber: "" });
+  const [customerId, setCustomerId] = useState("");
+  const [bankQuery, setBankQuery] = useState("");
+  const [modalOpen, setModalOpen] = useState(false);
+  const [modalMode, setModalMode] = useState<"choose" | "create" | "existing">("create");
+  const [payAfter, setPayAfter] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
   const [busy, setBusy] = useState(false);
 
-  async function loadAccounts() {
-    const res = await api.accounts();
-    const rows = res.data ?? [];
+  async function load(preferId?: string) {
+    const [acct, cust] = await Promise.all([api.accounts(), api.customers()]);
+    const rows = acct.data ?? [];
     setAccounts(rows);
-    setAccountId((current) => current || String(rows.find((a) => a.isDefault)?.id ?? rows[0]?.id ?? ""));
+    setCustomers(cust.data ?? []);
+    setAccountId((current) => {
+      const open = rows.filter((row) => !row.isFrozen);
+      if (preferId && open.some((row) => row.id === preferId)) return preferId;
+      if (current && open.some((row) => row.id === current)) return current;
+      return open.find((row) => row.isDefault)?.id ?? open[0]?.id ?? "";
+    });
   }
 
   useEffect(() => {
-    loadAccounts().catch(() => undefined);
+    load().catch(() => undefined);
   }, []);
 
-  const selected = accounts.find((a) => String(a.id) === accountId);
+  const visible = accounts.filter((account) => !account.isFrozen && accountMatches(account, customerId, bankQuery));
+  const selected = accounts.find((account) => account.id === accountId);
   const keyId = process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID ?? "";
 
-  async function addAccount() {
-    setError("");
-    try {
-      const created = await api.addAccount(newAccount);
-      await loadAccounts();
-      setAccountId(String(created.id));
-      setNewAccount({ label: "", bankName: "", holderName: "", ifsc: "", accountNumber: "" });
-      setShowAdd(false);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not add account");
-    }
+  function onCustomer(value: string) {
+    setCustomerId(value);
+    const rows = accounts.filter((account) => !account.isFrozen && accountMatches(account, value, bankQuery));
+    setAccountId((current) => {
+      if (current && rows.some((row) => row.id === current)) return current;
+      return rows.find((row) => row.isDefault)?.id ?? rows[0]?.id ?? "";
+    });
   }
 
-  async function payWithRazorpay() {
-    debugger
+  function onBankQuery(value: string) {
+    setBankQuery(value);
+    const rows = accounts.filter((account) => !account.isFrozen && accountMatches(account, customerId, value));
+    setAccountId((current) => (current && rows.some((row) => row.id === current) ? current : ""));
+  }
+
+  function closeModal() {
+    setModalOpen(false);
+    setPayAfter(false);
+  }
+
+  async function payWithRazorpay(forcedId?: string, forced?: AccountRow) {
     setError("");
     setSuccess("");
     const paise = Math.round(Number(amount) * 100);
     if (!Number.isFinite(paise) || paise < 100) {
       setError("Minimum amount is ₹1.");
-      return;
-    }
-    if (!accountId) {
-      setError("Choose which bank account should receive this money.");
       return;
     }
     if (!keyId) {
@@ -74,6 +89,19 @@ export default function TransferPage() {
       return;
     }
 
+    const id = forcedId || accountId;
+    const dest = forced ?? accounts.find((account) => account.id === id);
+    if (dest?.isFrozen) {
+      setError("That bank account is frozen. Choose another account.");
+      return;
+    }
+    if (!id || !dest) {
+      setPayAfter(true);
+      setModalMode("choose");
+      setModalOpen(true);
+      return;
+    }
+
     setBusy(true);
     try {
       const order = await api.createRazorpayOrder(paise, `rent_${Date.now()}`);
@@ -82,7 +110,7 @@ export default function TransferPage() {
         amount: order.amount,
         currency: order.currency,
         name: "UnifiedPay",
-        description: selected ? `Rent to ${String(selected.label)}` : "Rent payment",
+        description: `Rent to ${dest.customerName || dest.label}`,
         order_id: order.order_id,
         handler: async (response: {
           razorpay_payment_id: string;
@@ -121,6 +149,24 @@ export default function TransferPage() {
     }
   }
 
+  async function handleSaved(account: AccountRow) {
+    const shouldPay = payAfter;
+    setModalOpen(false);
+    setPayAfter(false);
+    await load(account.id);
+    if (account.customerId) setCustomerId(account.customerId);
+    if (shouldPay) await payWithRazorpay(account.id, account);
+  }
+
+  function handlePick(account: AccountRow) {
+    const shouldPay = payAfter;
+    setAccountId(account.id);
+    if (account.customerId) setCustomerId(account.customerId);
+    setModalOpen(false);
+    setPayAfter(false);
+    if (shouldPay) void payWithRazorpay(account.id, account);
+  }
+
   return (
     <>
       <Script src="https://checkout.razorpay.com/v1/checkout.js" strategy="afterInteractive" />
@@ -140,67 +186,57 @@ export default function TransferPage() {
               <h2 className="section-label" style={{ marginTop: 0 }}>
                 Which account should receive this money?
               </h2>
+              <label className="field">
+                <span>Customer</span>
+                <Select
+                  showSearch
+                  allowClear
+                  placeholder="Search customer"
+                  optionFilterProp="label"
+                  style={{ width: "100%" }}
+                  value={customerId || undefined}
+                  onChange={(value) => onCustomer(value ?? "")}
+                  options={customers.map((customer) => ({
+                    value: customer.id,
+                    label: customer.mobile ? `${customer.name} · ${customer.mobile}` : customer.name,
+                  }))}
+                  notFoundContent="No customer yet. Add one from Accounts, or while paying."
+                />
+              </label>
+              <label className="field">
+                <span>Bank</span>
+                <Input
+                  allowClear
+                  placeholder="Search bank, IFSC, or account"
+                  value={bankQuery}
+                  onChange={(e) => onBankQuery(e.target.value)}
+                />
+              </label>
               {accounts.length === 0 ? <p className="muted">Add a bank account before transferring.</p> : null}
-              <div className="account-list">
-                {accounts.map((a) => (
-                  <label key={String(a.id)} className={String(a.id) === accountId ? "account on" : "account"}>
-                    <input
-                      type="radio"
-                      name="account"
-                      checked={String(a.id) === accountId}
-                      onChange={() => setAccountId(String(a.id))}
-                      required
-                    />
-                    <span>
-                      <strong>{String(a.label)}</strong> · {String(a.bankName)}
-                      <div className="muted">
-                        {String(a.holderName)} · {String(a.ifsc)} · ****{String(a.accountLast4)}
-                      </div>
-                    </span>
-                  </label>
-                ))}
-              </div>
-              <Button style={{ marginTop: 12 }} onClick={() => setShowAdd((v) => !v)}>
-                {showAdd ? "Close" : "Add another account"}
+              <AccountChoices
+                accounts={visible}
+                value={accountId}
+                onChange={setAccountId}
+                empty={
+                  customerId
+                    ? "This customer has no matching bank account."
+                    : "No bank account matches this search."
+                }
+              />
+              <Button
+                htmlType="button"
+                style={{ marginTop: 12 }}
+                onClick={() => {
+                  setPayAfter(false);
+                  setModalMode("create");
+                  setModalOpen(true);
+                }}
+              >
+                {accounts.length ? "Add another account" : "Add account"}
               </Button>
-              {showAdd ? (
-                <div style={{ marginTop: 12 }}>
-                  <label className="field">
-                    <span>Nickname</span>
-                    <Input
-                      value={newAccount.label}
-                      onChange={(e) => setNewAccount({ ...newAccount, label: e.target.value })}
-                      placeholder="HDFC savings"
-                    />
-                  </label>
-                  <label className="field">
-                    <span>Bank name</span>
-                    <Input value={newAccount.bankName} onChange={(e) => setNewAccount({ ...newAccount, bankName: e.target.value })} />
-                  </label>
-                  <label className="field">
-                    <span>Account holder</span>
-                    <Input value={newAccount.holderName} onChange={(e) => setNewAccount({ ...newAccount, holderName: e.target.value })} />
-                  </label>
-                  <label className="field">
-                    <span>IFSC</span>
-                    <Input
-                      value={newAccount.ifsc}
-                      maxLength={11}
-                      onChange={(e) => setNewAccount({ ...newAccount, ifsc: e.target.value })}
-                    />
-                  </label>
-                  <label className="field">
-                    <span>Account number</span>
-                    <Input
-                      value={newAccount.accountNumber}
-                      onChange={(e) => setNewAccount({ ...newAccount, accountNumber: e.target.value })}
-                    />
-                  </label>
-                  <Button type="primary" onClick={addAccount}>
-                    Save account
-                  </Button>
-                </div>
-              ) : null}
+              <p className="muted" style={{ marginTop: 8 }}>
+                Saved accounts are managed customer-wise under Accounts. If none is selected, Pay asks you to create a new account or use an existing one.
+              </p>
               <h2 className="section-label">Amount</h2>
               <label className="field">
                 <span>Amount (₹)</span>
@@ -222,11 +258,15 @@ export default function TransferPage() {
             {selected ? (
               <>
                 <p>
-                  <strong>{String(selected.label)}</strong> · {String(selected.bankName)}
+                  <strong>{selected.label}</strong> · {selected.bankName}
+                  {selected.isDefault ? " · Primary" : ""}
                 </p>
-                <p className="muted">{String(selected.holderName)}</p>
-                <p className="muted">IFSC {String(selected.ifsc)}</p>
-                <p className="muted">Account ****{String(selected.accountLast4)}</p>
+                <p className="muted">{selected.customerName || selected.holderName}</p>
+                {selected.customerName && selected.customerName !== selected.holderName ? (
+                  <p className="muted">{selected.holderName}</p>
+                ) : null}
+                <p className="muted">IFSC {selected.ifsc}</p>
+                <p className="muted">Account ****{selected.accountLast4}</p>
               </>
             ) : (
               <p className="muted">Choose an account on the left before you transfer.</p>
@@ -237,6 +277,26 @@ export default function TransferPage() {
           </Card>
         </Col>
       </Row>
+      <BankAccountModal
+        open={modalOpen}
+        initialMode={modalMode}
+        payAfter={payAfter}
+        customers={customers}
+        accounts={accounts.filter((account) => !account.isFrozen)}
+        initialCustomerId={customerId}
+        initialBankQuery={bankQuery}
+        selectedAccountId={accountId}
+        onClose={closeModal}
+        onSaved={(account) => void handleSaved(account)}
+        onPick={handlePick}
+        onCustomerCreated={(customer) =>
+          setCustomers((prev) =>
+            prev.some((row) => row.id === customer.id)
+              ? prev
+              : [...prev, customer].sort((a, b) => a.name.localeCompare(b.name)),
+          )
+        }
+      />
     </>
   );
 }
