@@ -1,8 +1,8 @@
 "use client";
 
-import { Alert, Button, Card, Col, Empty, Input, Modal, Popconfirm, Row, Select, Tag } from "antd";
+import { Alert, Button, Card, Empty, Input, Modal, Popconfirm, Select, Table } from "antd";
 import { useEffect, useState } from "react";
-import { accountMatches } from "@/components/AccountChoices";
+import { accountDetail, accountMatches } from "@/components/AccountChoices";
 import { BankAccountModal } from "@/components/BankAccountModal";
 import { PageHeading } from "@/components/PageHeading";
 import { api, type AccountRow, type CustomerRow } from "@/lib/api";
@@ -12,8 +12,8 @@ const emptyCustomer = { name: "", mobile: "", email: "" };
 export default function AccountsPage() {
   const [customers, setCustomers] = useState<CustomerRow[]>([]);
   const [accounts, setAccounts] = useState<AccountRow[]>([]);
-  const [customerQuery, setCustomerQuery] = useState("");
-  const [bankQuery, setBankQuery] = useState("");
+  const [query, setQuery] = useState("");
+  const [expandedKeys, setExpandedKeys] = useState<string[] | null>(null);
   const [addOpen, setAddOpen] = useState(false);
   const [draft, setDraft] = useState(emptyCustomer);
   const [editorCustomerId, setEditorCustomerId] = useState("");
@@ -37,18 +37,10 @@ export default function AccountsPage() {
       .finally(() => setLoading(false));
   }, []);
 
-  const customerTerm = customerQuery.trim().toLowerCase();
-  const visibleCustomers = customers.filter((customer) => {
-    const nameHit =
-      !customerTerm ||
-      `${customer.name} ${customer.mobile ?? ""} ${customer.email ?? ""}`.toLowerCase().includes(customerTerm);
-    if (!nameHit) return false;
-    if (!bankQuery.trim()) return true;
-    return accounts.some((account) => account.customerId === customer.id && accountMatches(account, customer.id, bankQuery));
-  });
-  const unlinked = customerTerm
-    ? []
-    : accounts.filter((account) => !account.customerId && accountMatches(account, "", bankQuery));
+  const groups = customerGroups(customers, accounts, query);
+  const openKeys = query.trim()
+    ? groups.filter((group) => group.accounts.length > 0).map((group) => group.key)
+    : (expandedKeys ?? groups.map((group) => group.key));
 
   async function saveCustomer() {
     setError("");
@@ -150,41 +142,31 @@ export default function AccountsPage() {
     }
   }
 
-  function renderAccount(account: AccountRow) {
+  function accountActions(account: AccountRow) {
     return (
-      <div key={account.id} className={`account static${account.isDefault && !account.isFrozen ? " on" : ""}${account.isFrozen ? " frozen" : ""}`}>
-        <span className="account-body">
-          <strong>{account.label}</strong> · {account.bankName}
-          <div className="muted">
-            {account.holderName} · {account.ifsc} · ****{account.accountLast4}
-          </div>
-        </span>
-        <span className="account-action" style={{ display: "flex", gap: 4, alignItems: "center", flexWrap: "wrap", justifyContent: "flex-end" }}>
-          {account.isFrozen ? <Tag>Frozen</Tag> : null}
-          {account.isDefault && !account.isFrozen ? <Tag color="blue">Primary</Tag> : null}
-          {!account.isDefault && !account.isFrozen ? (
-            <Button type="link" loading={pendingId === account.id} onClick={() => void makePrimary(account.id)}>
-              Make primary
-            </Button>
-          ) : null}
-          <Button type="link" onClick={() => openEdit(account)}>
-            Edit
+      <span style={{ display: "flex", gap: 4, alignItems: "center", flexWrap: "wrap", justifyContent: "flex-end" }}>
+        {!account.isDefault && !account.isFrozen ? (
+          <Button type="link" loading={pendingId === account.id} onClick={() => void makePrimary(account.id)}>
+            Make primary
           </Button>
-          <Popconfirm
-            title="Delete this bank account?"
-            okText="Delete"
-            okButtonProps={{ danger: true }}
-            onConfirm={() => void removeAccount(account.id)}
-          >
-            <Button type="link" danger>
-              Delete
-            </Button>
-          </Popconfirm>
-          <Button type="link" loading={pendingId === account.id} onClick={() => void toggleFreeze(account)}>
-            {account.isFrozen ? "Unfreeze" : "Freeze"}
+        ) : null}
+        <Button type="link" onClick={() => openEdit(account)}>
+          Edit
+        </Button>
+        <Popconfirm
+          title="Delete this bank account?"
+          okText="Delete"
+          okButtonProps={{ danger: true }}
+          onConfirm={() => void removeAccount(account.id)}
+        >
+          <Button type="link" danger>
+            Delete
           </Button>
-        </span>
-      </div>
+        </Popconfirm>
+        <Button type="link" loading={pendingId === account.id} onClick={() => void toggleFreeze(account)}>
+          {account.isFrozen ? "Unfreeze" : "Freeze"}
+        </Button>
+      </span>
     );
   }
 
@@ -208,83 +190,82 @@ export default function AccountsPage() {
         subtitle="Bank accounts grouped by customer. The first account for a customer is primary until you choose another."
       />
       {error ? <Alert type="error" showIcon title={error} style={{ marginBottom: 16 }} /> : null}
-      <Card style={{ marginBottom: 24 }}>
-        <Row gutter={[16, 16]}>
-          <Col xs={24} md={12}>
-            <label className="field">
-              <span>Customer</span>
-              <Input
-                allowClear
-                placeholder="Search customer, mobile, or email"
-                value={customerQuery}
-                onChange={(e) => setCustomerQuery(e.target.value)}
-              />
-            </label>
-          </Col>
-          <Col xs={24} md={12}>
-            <label className="field">
-              <span>Bank</span>
-              <Input
-                allowClear
-                placeholder="Search bank, IFSC, or account"
-                value={bankQuery}
-                onChange={(e) => setBankQuery(e.target.value)}
-              />
-            </label>
-          </Col>
-        </Row>
-        <Button type="primary" onClick={() => setAddOpen(true)}>
-          Add customer
-        </Button>
+      <Card style={{ marginBottom: 16 }}>
+        <div style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
+          <Input
+            allowClear
+            placeholder="Search customer, mobile, email, bank, IFSC, or account"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            style={{ maxWidth: 480, flex: "1 1 280px" }}
+          />
+          <Button type="primary" onClick={() => setAddOpen(true)}>
+            Add customer
+          </Button>
+        </div>
       </Card>
 
-      {loading ? <p className="muted">Loading accounts…</p> : null}
-      {!loading && visibleCustomers.length === 0 && unlinked.length === 0 ? (
-        <Empty description="No customer matches. Add a customer, then add their bank account." />
-      ) : null}
-
-      {visibleCustomers.map((customer) => {
-        const rows = accounts.filter((account) => account.customerId === customer.id);
-        const shown = rows.filter((account) => accountMatches(account, customer.id, bankQuery));
-        const primary = rows.find((account) => account.isDefault);
-        return (
-          <Card
-            key={customer.id}
-            style={{ marginBottom: 16 }}
-            title={
-              <span>
-                {customer.name}
-                {primary ? (
-                  <Tag color="blue" style={{ marginLeft: 8 }}>
-                    Primary · {primary.bankName}
-                  </Tag>
-                ) : null}
-              </span>
-            }
-            extra={
-              <Button
-                onClick={() => {
-                  setError("");
-                  setEditorCustomerId(customer.id);
-                }}
-              >
-                Add account
-              </Button>
-            }
-          >
-            <p className="muted">{[customer.mobile, customer.email].filter(Boolean).join(" · ") || "No mobile or email"}</p>
-            {shown.length === 0 ? <p className="muted">No bank account yet.</p> : null}
-            <div className="account-list">{shown.map(renderAccount)}</div>
-          </Card>
-        );
-      })}
-
-      {unlinked.length ? (
-        <Card title="Not linked to a customer" style={{ marginTop: 8 }}>
-          <p className="muted">These accounts were saved before customers existed. New accounts are added under a customer.</p>
-          <div className="account-list">{unlinked.map(renderAccount)}</div>
-        </Card>
-      ) : null}
+      <Table
+        rowKey="key"
+        loading={loading}
+        dataSource={groups}
+        pagination={false}
+        locale={{ emptyText: <Empty description="No customer matches. Add a customer, then add their bank account." /> }}
+        expandable={{
+          expandedRowKeys: openKeys,
+          onExpandedRowsChange: (keys) => setExpandedKeys(keys.map(String)),
+          rowExpandable: (group) => group.accounts.length > 0,
+          expandedRowRender: (group) => (
+            <Table
+              rowKey="id"
+              size="small"
+              pagination={false}
+              dataSource={group.accounts}
+              columns={[
+                {
+                  title: "Bank account",
+                  render: (_, account) => <BankLine account={account} />,
+                },
+                {
+                  title: "",
+                  width: 340,
+                  render: (_, account) => accountActions(account),
+                },
+              ]}
+            />
+          ),
+        }}
+        columns={[
+          {
+            title: "Customer",
+            render: (_, group) => (
+              <div>
+                <strong>{group.title}</strong>
+                <div className="muted">{group.contact}</div>
+              </div>
+            ),
+          },
+          {
+            title: "Primary bank",
+            render: (_, group) => (group.primary ? <BankLine account={group.primary} /> : <span className="muted">No primary account</span>),
+          },
+          {
+            title: "",
+            width: 140,
+            render: (_, group) =>
+              group.customerId ? (
+                <Button
+                  onClick={() => {
+                    setError("");
+                    setEditorCustomerId(group.customerId ?? "");
+                  }}
+                >
+                  Add account
+                </Button>
+              ) : null,
+          },
+        ]}
+      />
 
       <Modal
         open={addOpen}
@@ -386,5 +367,64 @@ export default function AccountsPage() {
         }}
       />
     </>
+  );
+}
+
+type AccountGroup = {
+  key: string;
+  title: string;
+  contact: string;
+  customerId: string | null;
+  primary: AccountRow | null;
+  accounts: AccountRow[];
+};
+
+function customerGroups(customers: CustomerRow[], accounts: AccountRow[], query: string): AccountGroup[] {
+  const q = query.trim();
+  const groups: AccountGroup[] = customers.flatMap((customer) => {
+    const owned = accounts.filter((account) => account.customerId === customer.id);
+    const identity = `${customer.name} ${customer.mobile ?? ""} ${customer.email ?? ""}`;
+    const customerHit = !q || identity.toLowerCase().includes(q.toLowerCase());
+    const matched = owned.filter((account) => accountMatches(account, "", q));
+    if (q && !customerHit && matched.length === 0) return [];
+    return [
+      {
+        key: customer.id,
+        title: customer.name,
+        contact: [customer.mobile, customer.email].filter(Boolean).join(" · ") || "No mobile or email",
+        customerId: customer.id,
+        primary: owned.find((account) => account.isDefault && !account.isFrozen) ?? null,
+        accounts: q && !customerHit ? matched : owned,
+      },
+    ];
+  });
+
+  const unlinked = accounts.filter((account) => !account.customerId);
+  const unlinkedShown = unlinked.filter((account) => accountMatches(account, "", q));
+  if (unlinked.length && (!q || unlinkedShown.length)) {
+    groups.push({
+      key: "unlinked",
+      title: "Not linked to a customer",
+      contact: "These accounts were saved before customers existed.",
+      customerId: null,
+      primary: unlinked.find((account) => account.isDefault && !account.isFrozen) ?? null,
+      accounts: q ? unlinkedShown : unlinked,
+    });
+  }
+  return groups;
+}
+
+function BankLine({ account }: { account: AccountRow }) {
+  const detail = account.isFrozen
+    ? ["Frozen", account.holderName, account.ifsc, `****${account.accountLast4}`].join(" · ")
+    : accountDetail(account);
+  const highlighted = account.isDefault && !account.isFrozen;
+  return (
+    <div className={`account static${highlighted ? " on" : ""}${account.isFrozen ? " frozen" : ""}`}>
+      <span className="account-body">
+        <strong>{account.label}</strong> · {account.bankName}
+        <div className="muted">{detail}</div>
+      </span>
+    </div>
   );
 }
